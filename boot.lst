@@ -1,0 +1,263 @@
+     1                                  bits 16
+     2                                  org 0x7C00
+     3                                  
+     4                                  start:
+     5                                      ; Initialize segments and stack
+     6 00000000 FA                          cli
+     7 00000001 31C0                        xor ax, ax
+     8                                  
+     9 00000003 8ED8                        mov ds, ax
+    10 00000005 8ED0                        mov ss, ax
+    11 00000007 BC007C                      mov sp, 0x7C00
+    12                                  
+    13 0000000A FB                          sti
+    14 0000000B FC                          cld
+    15                                  
+    16                                      ; Set VGA mode 13h: 320x200, 256 colors
+    17 0000000C B81300                      mov ax, 0x0013
+    18 0000000F CD10                        int 0x10
+    19                                  
+    20                                      ; VGA framebuffer starts at segment A000
+    21 00000011 B800A0                      mov ax, 0xA000
+    22 00000014 8EC0                        mov es, ax
+    23                                      
+    24                                  draw_frame:
+    25                                      ; draw bottom row
+    26 00000016 B89600                      mov ax, 150
+    27 00000019 E80D01                      call draw_bottom_row_with_hole
+    28                                      
+    29                                      ; draw top row
+    30 0000001C B81900                      mov ax, 25
+    31 0000001F E8E700                      call draw_row
+    32                                      
+    33                                  
+    34                                      ; left column
+    35 00000022 B83200                      mov ax, 50
+    36 00000025 E8F000                      call draw_column
+    37                                      
+    38                                      ; right column
+    39 00000028 B8FA00                      mov ax, 250
+    40 0000002B E8EA00                      call draw_column
+    41                                      
+    42                                      ; pre render the flippers
+    43 0000002E B00F                        mov al, 15                  
+    44 00000030 8A16[8F01]                  mov dl, [left_flipper_state]                   
+    45 00000034 E81101                      call draw_left_flipper
+    46                                  
+    47 00000037 B00F                        mov al, 15                
+    48 00000039 8A16[9001]                  mov dl, [right_flipper_state]                   
+    49 0000003D E80E01                      call draw_right_flipper
+    50                                               
+    51                                  game_logic:
+    52 00000040 B401                        mov ah, 0x01
+    53 00000042 CD16                        int 16h
+    54 00000044 7444                        jz no_key_pressed
+    55                                      
+    56 00000046 B400                        mov ah, 0x00
+    57 00000048 CD16                        int 16h
+    58                                      
+    59                                      ; a key was entered
+    60 0000004A 3C61                        cmp al, 'a'
+    61 0000004C 7406                        je toggle_left_flipper
+    62                                      
+    63 0000004E 3C64                        cmp al, 'd'
+    64 00000050 7412                        je toggle_right_flipper
+    65                                      
+    66 00000052 EB36                        jmp no_key_pressed
+    67                                      
+    68                                      toggle_left_flipper:
+    69                                          ; erase current flipper by coloring it black
+    70 00000054 30C0                            xor al, al
+    71 00000056 8A16[8F01]                      mov dl, [left_flipper_state]
+    72 0000005A E8EB00                          call draw_left_flipper
+    73                                          
+    74                                          ; toggle the state
+    75 0000005D 8036[8F01]01                    xor byte [left_flipper_state], 1
+    76 00000062 EB10                            jmp redraw_left 
+    77                                          
+    78                                      toggle_right_flipper:
+    79                                          ; erase current flipper by coloring it black
+    80 00000064 30C0                            xor al, al
+    81 00000066 8A16[9001]                      mov dl, [right_flipper_state]
+    82 0000006A E8E100                          call draw_right_flipper
+    83                                          
+    84                                          ; toggle the state
+    85 0000006D 8036[9001]01                    xor byte [right_flipper_state], 1
+    86 00000072 EB0B                            jmp redraw_right
+    87                                      
+    88                                      redraw_left:
+    89 00000074 B00F                            mov al, 15
+    90 00000076 8A16[8F01]                      mov dl, [left_flipper_state]
+    91 0000007A E8CB00                          call draw_left_flipper
+    92 0000007D EB0B                            jmp no_key_pressed
+    93                                      
+    94                                      redraw_right:
+    95 0000007F B00F                            mov al, 15
+    96 00000081 8A16[9001]                      mov dl, [right_flipper_state]
+    97 00000085 E8C600                          call draw_right_flipper
+    98 00000088 EB00                            jmp no_key_pressed        
+    99                                      
+   100                                      no_key_pressed:
+   101                                          ; erase ball
+   102 0000008A 31C0                            xor ax, ax
+   103 0000008C E8DC00                          call draw_ball
+   104                                          
+   105                                          ; calc velocity and position
+   106 0000008F A1[9701]                        mov ax, [ball_vy]
+   107 00000092 40                              inc ax
+   108 00000093 A3[9701]                        mov [ball_vy], ax
+   109                                          
+   110 00000096 A1[9101]                        mov ax, [ball_x]
+   111 00000099 0306[9501]                      add ax, [ball_vx]
+   112 0000009D A3[9101]                        mov [ball_x], ax
+   113                                          
+   114 000000A0 A1[9301]                        mov ax, [ball_y]
+   115 000000A3 0306[9701]                      add ax, [ball_vy]
+   116 000000A7 A3[9301]                        mov [ball_y], ax
+   117                                          
+   118                                          ; wall collision check
+   119                                          ; left wall (if x <= 51)
+   120 000000AA 833E[9101]33                    cmp word [ball_x], 51
+   121 000000AF 7D0A                            jge check_right_wall
+   122 000000B1 C706[9101]3300                  mov word [ball_x], 51
+   123 000000B7 F71E[9501]                      neg word [ball_vx]  ; reverse the direction
+   124                                          
+   125                                          check_right_wall: ; if x >= 247
+   126 000000BB 813E[9101]F700                      cmp word [ball_x], 247
+   127 000000C1 7E0A                                jle check_top_wall
+   128 000000C3 C706[9101]F700                      mov word [ball_x], 247
+   129 000000C9 F71E[9501]                          neg word [ball_vx]
+   130                                          
+   131                                          check_top_wall: ; if y <= 26
+   132 000000CD 833E[9301]1A                        cmp word [ball_y], 26
+   133 000000D2 7D0A                                jge check_bottom
+   134 000000D4 C706[9301]1A00                      mov word [ball_y], 26
+   135 000000DA F71E[9701]                          neg word [ball_vy]
+   136                                          
+   137                                          check_bottom: ; if y < 160 reset to top
+   138 000000DE 813E[9301]A000                      cmp word [ball_y], 160
+   139 000000E4 7E18                                jle render_ball
+   140                                              
+   141                                              ; reset position and velocity
+   142 000000E6 C706[9101]6400                      mov word [ball_x], 100
+   143 000000EC C706[9301]2800                      mov word [ball_y], 40
+   144 000000F2 C706[9501]0200                      mov word [ball_vx], 2
+   145 000000F8 C706[9701]0000                      mov word [ball_vy], 0
+   146                                              
+   147                                          
+   148                                                  
+   149                                          render_ball:
+   150 000000FE B80F00                              mov ax, 15
+   151 00000101 E86700                              call draw_ball
+   152                                              
+   153                                              ; delay
+   154 00000104 FB                                  sti
+   155 00000105 F4                                  hlt
+   156 00000106 E937FF                              jmp game_logic
+   157                                      
+   158                                  
+   159                                      
+   160                                  draw_row:      
+   161 00000109 BB4001                      mov bx, 320
+   162 0000010C F7E3                        mul bx
+   163 0000010E 89C7                        mov di, ax  ; y
+   164                                      ; Color 15 = white
+   165 00000110 B00F                        mov al, 15
+   166                                      
+   167                                      ; offset = y * 320 + x
+   168 00000112 B94001                      mov cx, 320
+   169 00000115 F3AA                        rep stosb
+   170                                  
+   171 00000117 C3                          ret
+   172                                   
+   173                                  draw_column:                              
+   174 00000118 89C7                        mov di, ax  ; x
+   175 0000011A B00F                        mov al, 15    
+   176                                      
+   177 0000011C B9C800                      mov cx, 200
+   178                                      draw_column_loop:
+   179 0000011F 268805                          mov [es:di], al
+   180 00000122 81C74001                        add di, 320
+   181                                          
+   182 00000126 E2F7                            loop draw_column_loop
+   183                                      
+   184 00000128 C3                          ret
+   185                                      
+   186                                  draw_bottom_row_with_hole:
+   187 00000129 BB4001                      mov bx, 320
+   188 0000012C F7E3                        mul bx
+   189 0000012E 89C6                        mov si, ax  ; y
+   190 00000130 B00F                        mov al, 15
+   191 00000132 89F7                        mov di, si
+   192 00000134 83C732                      add di, 50
+   193                                      
+   194 00000137 B94700                      mov cx, 71
+   195 0000013A F3AA                        rep stosb
+   196                                      
+   197 0000013C 89F7                        mov di, si
+   198 0000013E 81C7B400                    add di, 180
+   199 00000142 B94700                      mov cx, 71
+   200 00000145 F3AA                        rep stosb   
+   201 00000147 C3                          ret
+   202                                  
+   203                                  ; color in al and state in dl                                
+   204                                  draw_left_flipper:  
+   205 00000148 BFF8BB                      mov di, 48120
+   206 0000014B FC                          cld
+   207 0000014C EB04                        jmp draw_flipper
+   208                                      
+   209                                  draw_right_flipper:
+   210 0000014E BF34BC                      mov di, 48180
+   211 00000151 FD                          std
+   212                                      ; fall through
+   213                                      
+   214                                  draw_flipper:
+   215 00000152 F6C201                      test dl, 1
+   216 00000155 BA4001                      mov dx, 320
+   217 00000158 7402                        jz flipper_step_ready
+   218 0000015A F7DA                        neg dx
+   219                                      
+   220                                  flipper_step_ready:
+   221 0000015C B91000                      mov cx, 16
+   222                                  
+   223                                  flipper_loop:
+   224 0000015F AA                          stosb
+   225 00000160 F6C101                      test cl, 1
+   226 00000163 7502                        jnz flipper_skip_step
+   227 00000165 01D7                        add di, dx
+   228                                  
+   229                                  flipper_skip_step:
+   230 00000167 E2F6                        loop flipper_loop
+   231                                      
+   232 00000169 FC                          cld
+   233 0000016A C3                          ret
+   234                                          
+   235                                  draw_ball:    
+   236 0000016B 88C1                        mov cl, al
+   237                                      
+   238 0000016D A1[9301]                    mov ax, [ball_y]
+   239 00000170 BB4001                      mov bx, 320
+   240 00000173 F7E3                        mul bx
+   241 00000175 0306[9101]                  add ax, [ball_x]
+   242 00000179 89C7                        mov di, ax
+   243 0000017B 88C8                        mov al, cl
+   244                                      
+   245 0000017D 268805                      mov [es:di], al
+   246 00000180 26884501                    mov [es:di + 1], al
+   247 00000184 2688854001                  mov [es:di + 320], al
+   248 00000189 2688854101                  mov [es:di + 321], al
+   249                                  
+   250 0000018E C3                          ret
+   251                                      
+   252 0000018F 00                      left_flipper_state db 0
+   253 00000190 00                      right_flipper_state db 0
+   254                                  
+   255 00000191 6400                    ball_x dw 100
+   256 00000193 2800                    ball_y dw 40
+   257 00000195 0200                    ball_vx dw 2
+   258 00000197 0000                    ball_vy dw 0
+   259                                          
+   260                                  
+   261                                  ; Pad to 510 bytes, then add boot signature
+   262 00000199 00<rept>                times 510 - ($ - $$) db 0
+   263 000001FE 55AA                    dw 0xAA55
