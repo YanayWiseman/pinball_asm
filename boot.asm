@@ -43,8 +43,7 @@ draw_frame:
     mov al, 15                  
     mov dl, [left_flipper_state]                   
     call draw_left_flipper
-
-    mov al, 15                
+                    
     mov dl, [right_flipper_state]                   
     call draw_right_flipper
              
@@ -130,9 +129,48 @@ game_logic:
         
         check_top_wall: ; if y <= 26
             cmp word [ball_y], 26
-            jge check_bottom
+            jge check_left_flipper
             mov word [ball_y], 26
             neg word [ball_vy]
+            
+        ; check left flipper (only if open)
+        cmp byte [left_flipper_state], 1
+        jne check_right_flipper
+        
+        check_left_flipper:
+            cmp word [ball_x], 118
+            jl check_right_flipper
+            cmp word [ball_x], 136
+            jg check_right_flipper
+            cmp word [ball_y], 140
+            jl check_right_flipper
+            cmp word [ball_y], 152
+            jg check_right_flipper
+            
+            ; left flipper hit
+            mov word [ball_y], 138
+            mov word [ball_vy], -8
+            mov word [ball_vx], 3
+            jmp check_bottom
+        
+        
+        check_right_flipper:
+            cmp byte [right_flipper_state], 1
+            jne check_bottom
+            
+            cmp word [ball_x], 168
+            jl check_bottom
+            cmp word [ball_x], 181
+            jg check_bottom
+            cmp word [ball_y], 140
+            jl check_bottom
+            cmp word [ball_y], 152
+            jg check_bottom
+            
+            ; right flipper hit
+            mov word [ball_y], 138
+            mov word [ball_vy], -8
+            mov word [ball_vx], -3            
         
         check_bottom: ; if y < 160 reset to top
             cmp word [ball_y], 160
@@ -176,8 +214,8 @@ draw_column:
     
     mov cx, 200
     draw_column_loop:
-        mov [es:di], al
-        add di, 320
+        stosb
+        add di, 319
         
         loop draw_column_loop
     
@@ -194,8 +232,7 @@ draw_bottom_row_with_hole:
     mov cx, 71
     rep stosb
     
-    mov di, si
-    add di, 180
+    add di, 59
     mov cx, 71
     rep stosb   
     ret
@@ -241,11 +278,11 @@ draw_ball:
     add ax, [ball_x]
     mov di, ax
     mov al, cl
+    mov ah, al
     
-    mov [es:di], al
-    mov [es:di + 1], al
-    mov [es:di + 320], al
-    mov [es:di + 321], al
+    stosw
+    add di, 318
+    stosw
 
     ret
     
